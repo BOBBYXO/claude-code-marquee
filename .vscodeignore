@@ -1,0 +1,12 @@
+.vscode/**
+.vscodeignore
+PLAN*.md
+tsconfig.json
+src/**
+node_modules/**
+out/**/*.map
+*.vsix
+.gitignore
+window/MarqueeForm.cs
+window/layout.txt
+window/state*.txt

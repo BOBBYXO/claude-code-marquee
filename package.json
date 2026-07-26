@@ -1,0 +1,34 @@
+{
+  "name": "claude-code-marquee",
+  "displayName": "Claude Code 跑马灯",
+  "description": "Claude Code 悬浮跑马灯 - 实时查看所有工作区会话状态的悬浮小窗",
+  "version": "0.1.0",
+  "publisher": "local",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "claudeCodeMarquee.open",
+        "title": "Claude Code 跑马灯: 打开面板"
+      }
+    ]
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.80.0",
+    "typescript": "^5.4.0",
+    "@types/node": "^20.0.0"
+  }
+}
