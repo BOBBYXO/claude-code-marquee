@@ -63,13 +63,13 @@ namespace ClaudeMarquee
             };
 
         // 布局常量
-        private const int bigD = 40;          // 大灯直径
+        private const int bigD = 36;          // 大灯直径
         private const int segD = 22;          // 灯带段直径
         private const int segGap = 6;         // 灯带段间距
         private const int lampCount = 8;
         private const int padL = 24;          // 左边距
         private const int padV = 20;          // 上下边距
-        private const int rowGap = 22;        // 会话行间距
+        private const int rowGap = 30;        // 会话行间距
         private const int segTextGap = 10;    // 灯带与文字的垂直间距
         private const int textH = 18;         // 文字行高度
         private const int afterBig = padL + bigD + 22;
