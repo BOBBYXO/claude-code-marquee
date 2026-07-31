@@ -20,9 +20,9 @@ export interface TranscriptEvent {
 }
 
 // 活跃阈值: 最近这段时间内有新事件算"活跃", 超过算空闲
-const ACTIVITY_WINDOW_MS = 8000;
+const ACTIVITY_WINDOW_MS = 60000;
 // tool_use 超时: 发起后这么久没收到对应 result, 认为工具还在跑(继续显示 TOOL_RUNNING)
-const TOOL_TIMEOUT_MS = 60000;
+const TOOL_TIMEOUT_MS = 300000;
 
 export interface StateContext {
     state: ClaudeState;
