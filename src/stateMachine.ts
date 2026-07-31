@@ -54,18 +54,21 @@ export function inferState(events: TranscriptEvent[], nowMs: number = Date.now()
     }
     const unfinishedTools = pendingToolUses.filter(id => !completedToolUses.has(id));
 
-    // 有未完成的 tool_use: 用 TOOL_TIMEOUT_MS(60s) 窗口, 让长时间运行的 bash/工具不误判为空闲
+    // 有未完成的 tool_use: 用 TOOL_TIMEOUT_MS 窗口, 让长时间运行的 bash/工具不误判为空闲
+    // 注意: 如果末行是无时间戳的元数据事件(ai-title/mode 等), lastTs 为 null,
+    //       此时不应判空闲, 仍应显示 TOOL_RUNNING, 让后续 default 递归跳过末行
     if (unfinishedTools.length > 0) {
-        if (lastTs != null && (nowMs - lastTs) <= TOOL_TIMEOUT_MS) {
+        if (lastTs == null || (nowMs - lastTs) <= TOOL_TIMEOUT_MS) {
             return { state: 'TOOL_RUNNING' };
         }
-        // 超过 60s 没结果, 认为工具卡住/会话已死
+        // 超过 TOOL_TIMEOUT_MS 没结果, 认为工具卡住/会话已死
         return { state: 'IDLE' };
     }
 
     // 空闲优先: 最近无新事件 -> IDLE
+    // 末行无时间戳(元数据事件)时, 不在这里判空闲, 让 switch default 递归跳过
     const recent = lastTs != null && (nowMs - lastTs) <= ACTIVITY_WINDOW_MS;
-    if (!recent) {
+    if (lastTs != null && !recent) {
         return { state: 'IDLE' };
     }
 
