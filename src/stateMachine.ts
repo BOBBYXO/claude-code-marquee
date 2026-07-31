@@ -21,8 +21,6 @@ export interface TranscriptEvent {
 
 // 活跃阈值: 最近这段时间内有新事件算"活跃", 超过算空闲
 const ACTIVITY_WINDOW_MS = 60000;
-// tool_use 超时: 发起后这么久没收到对应 result, 认为工具还在跑(继续显示 TOOL_RUNNING)
-const TOOL_TIMEOUT_MS = 300000;
 
 export interface StateContext {
     state: ClaudeState;
@@ -32,8 +30,10 @@ export interface StateContext {
 /**
  * 根据已解析事件序列推断当前瞬时状态.
  * events 按时间正序. nowMs 为当前时间戳(可注入便于测试).
+ * pidAlive: 该工作区是否还有 Claude 进程存活(来自 ~/.claude/sessions/<pid>.json 是否存在).
+ *           用于清除"幽灵"未完成 tool_use: 进程已退出但 transcript 残留未完成工具时, 判空闲.
  */
-export function inferState(events: TranscriptEvent[], nowMs: number = Date.now()): StateContext {
+export function inferState(events: TranscriptEvent[], nowMs: number = Date.now(), pidAlive: boolean = true): StateContext {
     if (events.length === 0) {
         return { state: 'IDLE' };
     }
@@ -54,15 +54,11 @@ export function inferState(events: TranscriptEvent[], nowMs: number = Date.now()
     }
     const unfinishedTools = pendingToolUses.filter(id => !completedToolUses.has(id));
 
-    // 有未完成的 tool_use: 用 TOOL_TIMEOUT_MS 窗口, 让长时间运行的 bash/工具不误判为空闲
-    // 注意: 如果末行是无时间戳的元数据事件(ai-title/mode 等), lastTs 为 null,
-    //       此时不应判空闲, 仍应显示 TOOL_RUNNING, 让后续 default 递归跳过末行
+    // 有未完成的 tool_use:
+    // - 进程还活着 -> 一律 TOOL_RUNNING(不设超时, 长 Bash/后台任务/AskUserQuestion 都不误判)
+    // - 进程已退出 -> 残留的"幽灵"未完成工具, 判空闲(进程都不在了, 工具不可能还在跑)
     if (unfinishedTools.length > 0) {
-        if (lastTs == null || (nowMs - lastTs) <= TOOL_TIMEOUT_MS) {
-            return { state: 'TOOL_RUNNING' };
-        }
-        // 超过 TOOL_TIMEOUT_MS 没结果, 认为工具卡住/会话已死
-        return { state: 'IDLE' };
+        return pidAlive ? { state: 'TOOL_RUNNING' } : { state: 'IDLE' };
     }
 
     // 空闲优先: 最近无新事件 -> IDLE
@@ -131,7 +127,7 @@ function findLast<T>(arr: T[], pred: (x: T) => boolean): T | undefined {
 }
 
 // 工具用: 超时常量
-export const _TIMEOUTS = { ACTIVITY_WINDOW_MS, TOOL_TIMEOUT_MS };
+export const _TIMEOUTS = { ACTIVITY_WINDOW_MS };
 
 // 状态优先级: 越忙越大. 用于合并同一工作区多个会话的状态(取最忙).
 const STATE_PRIORITY: Record<ClaudeState, number> = {
@@ -145,8 +141,10 @@ const STATE_PRIORITY: Record<ClaudeState, number> = {
 /**
  * 合并多个会话的状态, 取最忙的那个(优先级最高).
  * 用于: 同一工作区有多个 Claude 会话时, 该工作区的窗显示最忙会话的状态.
+ * pidAlive: 该工作区是否还有任意一个 Claude 进程存活(任一活即 true).
+ *           传给 inferState 清除幽灵未完成工具.
  */
-export function mergeStates(contexts: StateContext[]): StateContext {
+export function mergeStates(contexts: StateContext[], pidAlive: boolean = true): StateContext {
     if (contexts.length === 0) return { state: 'IDLE' };
     let best = contexts[0];
     let bestPri = STATE_PRIORITY[best.state] ?? 0;

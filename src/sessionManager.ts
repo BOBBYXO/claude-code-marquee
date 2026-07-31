@@ -80,7 +80,14 @@ export interface WorkspaceState {
     project: string;
     state: ClaudeState;
     detail?: string;
-    lastActiveMs: number;   // 该工作区最近会话文件的修改时间
+    lastActiveMs: number;   // 该工作区最近活动时间(jsonl mtime 与 session updatedAt 取大)
+}
+
+// ~/.claude/sessions/<pid>.json 结构: 进程退出时该文件被删除, 存在即进程存活
+interface SessionEntry {
+    pid: number;
+    cwd: string;
+    updatedAt?: number;
 }
 
 // 文件级缓存: mtime/size 未变则复用 cwd 和 events, 跳过所有文件读取
@@ -109,6 +116,7 @@ export class SessionManager implements Disposable {
     private disposed = false;
     private readonly maxEvents = 300;
     private readonly projectsRoot = path.join(os.homedir(), '.claude', 'projects');
+    private readonly sessionsRoot = path.join(os.homedir(), '.claude', 'sessions');
     private cache = new Map<string, FileCache>();
     private scanning = false;
     private pendingScan = false;
@@ -200,19 +208,28 @@ export class SessionManager implements Disposable {
                 if (cwd) this.addToCwdMap(byCwd, cwd, full, stat.mtimeMs);
             }
 
+            // 读 ~/.claude/sessions/*.json: 按 cwd 聚合进程存活 + 最近 updatedAt
+            // 进程退出时 session 文件被删除, 故文件存在即进程存活
+            const sessionsByCwd = await this.readSessions();
+
             // 每个 cwd: 取最近若干个会话文件, 合并状态取最忙
             const result: WorkspaceState[] = [];
             for (const { cwd, files } of byCwd.values()) {
                 files.sort((a, b) => b.mtime - a.mtime);
                 const recent = files.slice(0, 5);
+                const key = cwd.replace(/\\/g, '/').toLowerCase();
+                const sess = sessionsByCwd.get(key);
+                const pidAlive = sess ? sess.length > 0 : false;
                 const ctxs: StateContext[] = [];
                 for (const f of recent) {
                     const ev = this.cache.get(f.full)?.events ?? [];
                     if (ev.length === 0) continue;
-                    ctxs.push(inferState(ev));
+                    ctxs.push(inferState(ev, Date.now(), pidAlive));
                 }
-                const merged = mergeStates(ctxs);
-                const lastActiveMs = files.length > 0 ? files[0].mtime : 0;
+                const merged = mergeStates(ctxs, pidAlive);
+                const jsonlMtime = files.length > 0 ? files[0].mtime : 0;
+                const sessionUpdated = sess ? Math.max(0, ...sess.map(s => s.updatedAt ?? 0)) : 0;
+                const lastActiveMs = Math.max(jsonlMtime, sessionUpdated);
                 result.push({ cwd, project: projectOf(cwd), state: merged.state, detail: merged.detail, lastActiveMs });
             }
 
@@ -230,6 +247,30 @@ export class SessionManager implements Disposable {
         const key = cwd.replace(/\\/g, '/').toLowerCase();
         if (!byCwd.has(key)) byCwd.set(key, { cwd, files: [] });
         byCwd.get(key)!.files.push({ full, mtime });
+    }
+
+    // 读 ~/.claude/sessions/*.json, 按 cwd(规范化) 聚合.
+    // session 文件存在 = 对应 pid 的 Claude 进程存活(进程退出即删文件).
+    private async readSessions(): Promise<Map<string, SessionEntry[]>> {
+        const byCwd = new Map<string, SessionEntry[]>();
+        let names: string[];
+        try {
+            names = await fsp.readdir(this.sessionsRoot);
+        } catch {
+            return byCwd; // 目录不存在: 无活进程
+        }
+        for (const name of names) {
+            if (!name.endsWith('.json')) continue;
+            try {
+                const raw = JSON.parse(await fsp.readFile(path.join(this.sessionsRoot, name), 'utf8'));
+                if (!raw.cwd) continue;
+                const key = String(raw.cwd).replace(/\\/g, '/').toLowerCase();
+                const arr = byCwd.get(key) ?? [];
+                arr.push({ pid: raw.pid, cwd: raw.cwd, updatedAt: raw.updatedAt });
+                byCwd.set(key, arr);
+            } catch { /* skip */ }
+        }
+        return byCwd;
     }
 
     // 从文件尾部反向读 TAIL_BYTES, 解析行, 取尾部 maxEvents 条事件(正序)
