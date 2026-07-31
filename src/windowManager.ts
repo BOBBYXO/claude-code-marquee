@@ -19,6 +19,8 @@ export class WindowManager implements Disposable {
         this.exePath = path.join(context.asAbsolutePath('.'), 'window', 'MarqueeWindow.exe');
         // 共享 state 文件: 所有扩展实例都写 %TEMP%/claude-marquee-state.txt
         this.stateFile = path.join(tmpdir(), 'claude-marquee-state.txt');
+        // 立即 spawn 窗口显示"等待会话", 不等首次 scan 完成(解决启动慢)
+        this.ensureWindow();
     }
 
     // 收到所有工作区状态, 写共享汇总文件 + 确保窗已启动
