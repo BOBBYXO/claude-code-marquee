@@ -40,18 +40,6 @@ export function inferState(events: TranscriptEvent[], nowMs: number = Date.now()
 
     const last = events[events.length - 1];
     const lastTs = parseTs(last.timestamp);
-    const recent = lastTs != null && (nowMs - lastTs) <= ACTIVITY_WINDOW_MS;
-
-    // 空闲优先: 最近无新事件 -> IDLE(无论是否有未完成的 tool_use, 可能会话被打断/关闭)
-    if (!recent) {
-        return { state: 'IDLE' };
-    }
-
-    // 出错判定: 仅当最后一条事件就是 api_error 时才算出错.
-    // (历史 api_error 后若已有其他事件, 说明会话已恢复, 不再亮红)
-    if (last.type === 'system' && last.systemSubtype === 'api_error') {
-        return { state: 'ERROR', detail: 'API 错误' };
-    }
 
     // 收集所有 tool_use id, 减去已收到 tool_result 的, 得到"未完成"的工具调用
     const pendingToolUses: string[] = [];
@@ -66,14 +54,30 @@ export function inferState(events: TranscriptEvent[], nowMs: number = Date.now()
     }
     const unfinishedTools = pendingToolUses.filter(id => !completedToolUses.has(id));
 
+    // 有未完成的 tool_use: 用 TOOL_TIMEOUT_MS(60s) 窗口, 让长时间运行的 bash/工具不误判为空闲
+    if (unfinishedTools.length > 0) {
+        if (lastTs != null && (nowMs - lastTs) <= TOOL_TIMEOUT_MS) {
+            return { state: 'TOOL_RUNNING' };
+        }
+        // 超过 60s 没结果, 认为工具卡住/会话已死
+        return { state: 'IDLE' };
+    }
+
+    // 空闲优先: 最近无新事件 -> IDLE
+    const recent = lastTs != null && (nowMs - lastTs) <= ACTIVITY_WINDOW_MS;
+    if (!recent) {
+        return { state: 'IDLE' };
+    }
+
+    // 出错判定: 仅当最后一条事件就是 api_error 时才算出错.
+    // (历史 api_error 后若已有其他事件, 说明会话已恢复, 不再亮红)
+    if (last.type === 'system' && last.systemSubtype === 'api_error') {
+        return { state: 'ERROR', detail: 'API 错误' };
+    }
+
     // 按最后一条事件类型判定
     switch (last.type) {
         case 'assistant': {
-            // 有未完成的工具调用 -> 工具执行中
-            if (unfinishedTools.length > 0) {
-                // 但如果工具发起太久没结果, 可能已经卡住; 仍显示执行中
-                return { state: 'TOOL_RUNNING' };
-            }
             // 无未完成工具: 看 stop_reason
             if (last.stopReason === 'end_turn') {
                 return { state: 'WAITING_INPUT' };
@@ -123,7 +127,7 @@ function findLast<T>(arr: T[], pred: (x: T) => boolean): T | undefined {
     return undefined;
 }
 
-// 工具用: 给未完成 tool_use 设的超时(目前仅用于说明, 实际判定用 unfinishedTools 集合)
+// 工具用: 超时常量
 export const _TIMEOUTS = { ACTIVITY_WINDOW_MS, TOOL_TIMEOUT_MS };
 
 // 状态优先级: 越忙越大. 用于合并同一工作区多个会话的状态(取最忙).

@@ -13,16 +13,27 @@ namespace ClaudeMarquee
 {
     static class Program
     {
+        private static System.Threading.Mutex mutex = null;
+
         [DllImport("shcore.dll")]
         private static extern int SetProcessDpiAwareness(int value);
 
         [STAThread]
         static void Main(string[] args)
         {
+            // 单实例检测: 已有跑马灯窗口则退出, 避免多 VS Code 窗口重复启动
+            bool created;
+            mutex = new System.Threading.Mutex(true, "ClaudeMarqueeMutex", out created);
+            if (!created)
+            {
+                // 另一实例已在运行, 新实例的 state 由已有实例通过共享文件读到
+                return;
+            }
+
             try { SetProcessDpiAwareness(2); } catch { }
 
             // args: [0]=state文件 [1]=初始x [2]=初始y
-            string stateFile = args.Length > 0 ? args[0] : Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "state.txt");
+            string stateFile = args.Length > 0 ? args[0] : Path.Combine(Path.GetTempPath(), "claude-marquee-state.txt");
             int x = 120, y = 120;
             if (args.Length > 1) int.TryParse(args[1], out x);
             if (args.Length > 2) int.TryParse(args[2], out y);
