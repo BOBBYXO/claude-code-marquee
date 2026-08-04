@@ -220,6 +220,9 @@ export class SessionManager implements Disposable {
                 const key = cwd.replace(/\\/g, '/').toLowerCase();
                 const sess = sessionsByCwd.get(key);
                 const pidAlive = sess ? sess.length > 0 : false;
+                // 进程已退出(pidAlive=false)的对话视为已关闭, 不显示.
+                // session 文件随进程退出而删除, 故 pidAlive=false 可靠表示该 cwd 无活进程.
+                if (!pidAlive) continue;
                 const ctxs: StateContext[] = [];
                 for (const f of recent) {
                     const ev = this.cache.get(f.full)?.events ?? [];
